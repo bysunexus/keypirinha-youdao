@@ -74,14 +74,16 @@ class youdao(kp.Plugin):
             return
 
         suggestions = []
-        word = urllib.parse.quote_plus(user_input.strip())
+        origin_word = user_input.strip()
+        word = urllib.parse.quote_plus(origin_word)
         try:
             # get translated version of terms
             opener = kpnet.build_urllib_opener()
             opener.addheaders = [("User-agent", self.API_USER_AGENT)]
             rnum = str(random.randint(0, 10000))
-            sign = self.get_md5(self._key + word + rnum + self._keyfrom)
+            sign = self.get_md5(self._key + origin_word + rnum + self._keyfrom)
             url = self.URL_YOUDAO.format(word, rnum, sign)
+            print(url)
             with opener.open(url) as conn:
                 response = conn.read()
             if self.should_terminate():
@@ -103,7 +105,11 @@ class youdao(kp.Plugin):
                 target=str(idx) + str(res['translation']),
                 args_hint=kp.ItemArgsHint.REQUIRED,
                 hit_hint=kp.ItemHitHint.IGNORE,
-                icon_handle=self._icon
+                icon_handle=self._icon,
+                data_bag=kpu.kwargs_encode(
+                    word=word,
+                    translation=res['translation']
+                )
             ))
             idx += 1
         if suggestions:
