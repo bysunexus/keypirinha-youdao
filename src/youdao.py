@@ -2,6 +2,8 @@
 # Keypirinha launcher (keypirinha.com)
 
 import json
+import hashlib
+import random
 import traceback
 import urllib.error
 import urllib.parse
@@ -17,7 +19,7 @@ class youdao(kp.Plugin):
     """
     ACTION_DEFAULT = '0_copy'
     API_USER_AGENT = "Mozilla/5.0"
-    URL_YOUDAO = 'http://fanyi.youdao.com/openapi.do?keyfrom={}&key={}&type=data&doctype=json&version=1.1&q={}'
+    URL_YOUDAO = 'http://openapi.youdao.com/api?q={}&from=auto&to=auto&appKey=082d2d8ef2343b9e&salt={}&sign={}'
 
     ITEMCAT_TRANSLATE = kp.ItemCategory.USER_BASE + 1
     ITEMCAT_RESULT = kp.ItemCategory.USER_BASE + 2
@@ -53,6 +55,11 @@ class youdao(kp.Plugin):
             icon_handle=self._icon
         )])
 
+    def get_md5(self, dest):
+        md5 = hashlib.md5()
+        md5.update(dest.encode('utf-8'))
+        return md5.hexdigest().upper()
+
     def on_suggest(self, user_input, items_chain):
         if not user_input:
             return
@@ -72,7 +79,9 @@ class youdao(kp.Plugin):
             # get translated version of terms
             opener = kpnet.build_urllib_opener()
             opener.addheaders = [("User-agent", self.API_USER_AGENT)]
-            url = self.URL_YOUDAO.format(self._keyfrom, self._key, word)
+            rnum = str(random.randint(0, 10000))
+            sign = self.get_md5(self._key + word + rnum + self._keyfrom)
+            url = self.URL_YOUDAO.format(word, rnum, sign)
             with opener.open(url) as conn:
                 response = conn.read()
             if self.should_terminate():
@@ -85,20 +94,18 @@ class youdao(kp.Plugin):
             suggestions.append(self.create_error_item(label=user_input, short_desc="Error: " + str(exc)))
             traceback.print_exc()
             return
+        idx = 0
         for res in results:
             suggestions.append(self.create_item(
                 category=self.ITEMCAT_RESULT,
-                label=res['translation'],
-                short_desc=res['description'],
-                target=res['translation'],
+                label=str(res['translation']),
+                short_desc=str(res['description']),
+                target=str(idx) + str(res['translation']),
                 args_hint=kp.ItemArgsHint.REQUIRED,
                 hit_hint=kp.ItemHitHint.IGNORE,
-                icon_handle=self._icon,
-                data_bag=kpu.kwargs_encode(
-                    word=word,
-                    translation=res['translation']
-                )
+                icon_handle=self._icon
             ))
+            idx += 1
         if suggestions:
             self.set_suggestions(suggestions, kp.Match.ANY, kp.Sort.NONE)
 
@@ -134,38 +141,26 @@ class youdao(kp.Plugin):
 
     def _read_config(self):
         settings = self.load_settings()
-        self._key = settings.get_bool("youdao_key", "main", "1061185281")
-        self._keyfrom = settings.get_bool("youdao_keyfrom", "main", "my-wox")
+        self._key = settings.get_bool("youdao_key", "main", "082d2d8ef2343b9e")
+        self._keyfrom = settings.get_bool("youdao_keyfrom", "main", "mcv5q7AflHFZQAaN6VF43lf55aISJoq5")
 
     def _parse_api_response(self, response):
-        # http://fanyi.youdao.com/openapi.do?keyfrom=my-wox&key=1061185281&type=data&doctype=json&version=1.1&q=good
-        # {
-        #     "errorCode":0
-        #     "query":"good",
-        #     "translation":["好"], // 有道翻译
-        # "basic":{ // 有道词典-基本词典
-        # "phonetic":"gʊd"
-        #            "uk-phonetic":"gʊd" //英式发音
-        # "us-phonetic":"ɡʊd" //美式发音
-        # "explains":[
-        #     "好处",
-        #     "好的"
-        #     "好"
-        # ]
-        # },
-        # "web":[ // 有道词典-网络释义
-        # {
-        #     "key":"good",
-        #     "value":["良好","善","美好"]
-        # },
-        # {...}
-        # ]
-        # }
         response = response.decode(encoding="utf-8", errors="strict")
         result = json.loads(response)
+        # {'web': [{'value': ['好', '善', '商品'], 'key': 'Good'}, {'value': ['公共物品', '公益事业', '公共财'], 'key': 'public good'}, {'value': ['干的出色', '干得好', '好工作'], 'key': 'Good Job'}],
+        # 'query': 'good',
+        # 'translation': ['很好'],
+        # 'errorCode': '0',
+        # 'basic': {'us-phonetic': 'ɡʊd', 'phonetic': 'gʊd', 'uk-phonetic': 'gʊd', 'explains': ['n. 好处；善行；慷慨的行为', 'adj. 好的；优良的；愉快的；虔诚的', 'adv. 好', 'n. (Good)人名；(英)古德；(瑞典)戈德']},
+        # 'l': 'EN2zh-CHS'}
         translated = []
-        if 0 != result['errorCode']:
+        if '0' != result['errorCode']:
             return translated
+        if 'translation' in result.keys():
+            translated.append({
+                'translation': ','.join(result['translation']),
+                'description': result['query']
+            })
         if 'basic' in result.keys():
             basic = result['basic']
             description = ''
@@ -184,7 +179,7 @@ class youdao(kp.Plugin):
         if 'web' in result.keys():
             for explain in result['web']:
                 translated.append({
-                    'translation': explain['key'],
-                    'description': ','.join(explain['value'])
+                    'translation': ','.join(explain['value']),
+                    'description': explain['key']
                 })
         return translated
